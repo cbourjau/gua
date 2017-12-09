@@ -51,24 +51,22 @@ def restore_matplotlib_defaults():
     mpl.rcParams.update(mpl.rcParamsDefault)
 
 
-def generic_2d(a, edges1, edges2, ax=None, label=r'', a_label=r'', b_label=r'', **kwargs):
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(TEXT_WIDTH / 2 * 1.25, TEXT_WIDTH / 2),
-                               subplot_kw={'aspect': 1})
+def generic_2d_no_cbar(a, edges1, edges2, ax, label=r'', a_label=r'', b_label=r'', **kwargs):
+    """
+    Plot a 2D heatmap without a color bar
+    """
     # Mask invalid values
     a = np.ma.masked_invalid(a)
-    mappable = ax.pcolormesh(edges1, edges2, a,
+    mappable = ax.pcolormesh(edges2, edges1, a,
                              cmap=plt.get_cmap(kwargs.get('cmap', 'viridis')),
                              vmin=kwargs.get('vmin', None),
                              vmax=kwargs.get('vmax', None))
-    nan_color = 'gray'
-    ax.patch.set(hatch='xx', facecolor=nan_color)
-    patch_label = mpl.patches.Patch(color=nan_color, label='No data')
-    plt.legend(handles=[patch_label], loc='upper left')
-    # allocates the colorbar axis; (extending the figure?)
-    # numbers are magic to make the cbar have the same hight as the plot
-    plt.colorbar(mappable, fraction=0.046, pad=0.03, label=label)
-
+    # Legend for invalid data if any
+    if np.any(np.isnan(a)) or np.ma.is_masked(a):
+        nan_color = 'gray'
+        ax.patch.set(hatch='xx', facecolor=nan_color)
+        patch_label = mpl.patches.Patch(color=nan_color, label='No data')
+        ax.legend(handles=[patch_label], loc='upper left')
     # its row - colum order in numpy!
     ax.set_xlabel(b_label)
     ax.set_ylabel(a_label)
@@ -76,6 +74,23 @@ def generic_2d(a, edges1, edges2, ax=None, label=r'', a_label=r'', b_label=r'', 
     if kwargs.get('title', None):
         plt.title(kwargs.get('title', None))
     plt.legend()
+    return mappable
+
+
+def generic_2d(a, edges1, edges2, ax=None, label=r'', a_label=r'', b_label=r'', cax=None, **kwargs):
+    if ax is None:
+        fig = plt.figure(figsize=(TEXT_WIDTH / 2 * 1.25, TEXT_WIDTH / 2))
+        gs = mpl.gridspec.GridSpec(2, 15, wspace=0.2, top=0.95, bottom=0.15, left=0.15, right=0.88)
+        fig.tight_layout()
+        ax = plt.subplot(gs[:, :-1])
+        cax = plt.subplot(gs[:, -1:])
+    mappable = generic_2d_no_cbar(a, edges1, edges2, ax, label, a_label, b_label, **kwargs)
+    if cax is None:
+        # allocates the colorbar axis; (extending the figure?)
+        # numbers are magic to make the cbar have the same hight as the plot
+        plt.colorbar(mappable, fraction=0.046, pad=0.03, label=label)
+    else:
+        plt.colorbar(mappable, label=label, cax=cax)
     return ax
 
 
