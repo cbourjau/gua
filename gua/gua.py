@@ -15,63 +15,71 @@ class Gua():
         self.phi_edges = edges[1]
         self.z_edges = edges[-1]
         max_res_map, max_res_edges = get_max_res_map(fname)
-        self.dead_regions = utils.get_dead_regions_map(edges[0], edges[1], edges[-1],
-                                                       max_res_map, max_res_edges)
+        # False == Dead
+        self.acceptance = ~utils.get_dead_regions_map(edges[0], edges[1], edges[-1],
+                                                      max_res_map, max_res_edges)
         self.dphi_edges = None
         self.deta_edges = None
         self.cent_bins = cent_bins
 
-    def rho2(self):
+    def r2(self):
         """
-        Compute the pair probability distribution and its uncertainties
+        Compute the normalized pair probability distribution and its uncertainties
         """
         ss = (self.singles[:, None, :, None, ...] * self.singles[None, :, None, :, ...])
-        rho2 = np.full_like(self.pairs, np.nan)
-        rho2[self.pairs > 0] = self.pairs[self.pairs > 0] / ss[self.pairs > 0]
-        rho2 *= self.evt_counter
-        # Normalize each cent-z-slice
-        eta_width = self.eta_edges[1] - self.eta_edges[0]
-        phi_width = self.phi_edges[1] - self.phi_edges[0]
-        scalling = utils.reduce_all_but(rho2, [4, 5], np.nansum) * eta_width**2 * phi_width**2
-        rho2 /= scalling
-        # Compute uncertainties based on pairs
-        sig_rel = np.full_like(rho2, np.nan)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            sig_rel[~np.isnan(rho2)] = 1.0 / np.sqrt(self.pairs[~np.isnan(rho2)])
-        sigma_abs = rho2 * sig_rel
-        # Set values where we do not have a
-        sigma_abs[np.isnan(rho2)] = np.nan
-        # disable the diagonal in (eta, eta) FIXME: Should only be the phi-phi diagonal!
-        eta_diag_idx = np.diag_indices(rho2.shape[0])
-        rho2[eta_diag_idx[0], eta_diag_idx[1], ...] = np.nan
-        return rho2, sigma_abs
+        r2 = np.full_like(self.pairs, np.nan)
+        r2[self.pairs > 0] = self.pairs[self.pairs > 0] / ss[self.pairs > 0]
+        r2 *= self.evt_counter
 
-    def rho2_dphi(self):
+        # Mask parts that overlap with dead regions
+        r2 = np.ma.masked_array(r2, mask=self.pair_acceptance())
+
+        # Normalize each cent-z-slice
+        # eta_width = self.eta_edges[1] - self.eta_edges[0]
+        # phi_width = self.phi_edges[1] - self.phi_edges[0]
+
+        # scalling = utils.reduce_all_but(r2, [4, 5], np.nansum) * eta_width**2 * phi_width**2
+        # r2 /= scalling
+        # Compute uncertainties based on pairs
+        sig_rel = np.full_like(r2, np.nan)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            sig_rel[~np.isnan(r2)] = 1.0 / np.sqrt(self.pairs[~np.isnan(r2)])
+        sigma_abs = r2 * sig_rel
+        # disable the diagonal in (eta, eta) FIXME: Should only be the phi-phi diagonal!
+        eta_diag_idx = np.diag_indices(r2.shape[0])
+        r2[eta_diag_idx[0], eta_diag_idx[1], ...] = np.nan
+        # Set values where we do not have a r2
+        sigma_abs[np.isnan(r2)] = np.nan
+        sigma_abs = np.ma.masked_array(sigma_abs, mask=self.pair_acceptance())
+        return r2, sigma_abs
+
+    def r2_dphi(self):
         """
-        Pair distribution rho2(eta1, eta2, dphi, cent, z)
+        Normalized distribution of pairs r2(eta1, eta2, dphi, cent, z)
         """
-        rho2, sig = self.rho2()
+        r2, sig = self.r2()
         keep_axes = [0, 1, [2, 3], 4, 5]
-        eta_width = self.eta_edges[1] - self.eta_edges[0]
-        dphi_width = self.phi_edges[1] - self.phi_edges[0]
-        rho2_dphi = utils.reduce_weighted_avg(rho2, sig, axes=keep_axes, new_dphi_axis=2)
+        r2_dphi = utils.reduce_weighted_avg(r2, sig, axes=keep_axes, new_dphi_axis=2)
         sig_dphi = utils.reduce_all_but(sig, axes=keep_axes,
                                         func=utils.uncert_weighted_avg,
                                         new_dphi_axis=2)
         # Re-calculate scalling
-        scalling = utils.reduce_all_but(rho2_dphi, [3, 4], np.nansum) * eta_width**2 * dphi_width
-        return rho2_dphi / scalling, sig_dphi / scalling
+        # eta_width = self.eta_edges[1] - self.eta_edges[0]
+        # dphi_width = self.phi_edges[1] - self.phi_edges[0]
+        # scalling = utils.reduce_all_but(rho2_dphi, [3, 4], np.nansum) * eta_width**2 * dphi_width
+        # return r2_dphi / scalling, sig_dphi / scalling
+        return r2_dphi, sig_dphi
 
     def vnm(self, n_boot=100):
         """
         Compute 2D Fourier transform of phi1/phi2 plane and its uncertainties (bootstrapped)
         """
         col = Collector()
-        rho2, sig = self.rho2()
+        r2, sig = self.r2()
         for _ in range(n_boot):
-            _strapped = np.full_like(rho2, np.nan)
-            _strapped[~np.isnan(rho2)] = np.random.normal(loc=rho2[~np.isnan(rho2)],
-                                                          scale=sig[~np.isnan(rho2)])
+            _strapped = np.full_like(r2.data, np.nan)
+            _strapped[~np.isnan(r2)] = np.random.normal(loc=r2[~np.isnan(r2)],
+                                                        scale=sig[~np.isnan(r2)])
             # Fourier over phi1, phi2
             Vnm = np.fft.fft2(_strapped, axes=(2, 3))
             # Align the origin such that n=m=0 is at 00 and the positive modes follow the bin indices
@@ -87,39 +95,60 @@ class Gua():
 
     def vnn_from_dphi(self, n_boot=100):
         col = Collector()
-        rho2, sig = self.rho2_dphi()
+        r2, sig = self.r2_dphi()
         for _ in range(n_boot):
-            _strapped = np.full_like(rho2, np.nan)
-            _strapped[~np.isnan(rho2)] = np.random.normal(loc=rho2[~np.isnan(rho2)],
-                                                          scale=sig[~np.isnan(rho2)])
+            _strapped = np.full_like(r2, np.nan)
+            _strapped[~np.isnan(r2)] = np.random.normal(loc=r2[~np.isnan(r2)],
+                                                        scale=sig[~np.isnan(r2)])
             Vnn = np.fft.rfft(_strapped, axis=2)
             vnn = np.abs(Vnn)
             # Normalize to 0 mode
             scalling = vnn[:, :, [0], ...]
             vnn /= scalling
             col.add(vnn)
-        return col.mean(), col.sigma()
+        mean, sig = col.mean(), col.sigma()
+        mask = np.broadcast_to(self.vnn_acceptance()[:, :, None, ...], mean.shape)
+        mean = np.ma.masked_array(mean, mask=mask)
+        sig = np.ma.masked_array(sig, mask=mask)
+        # Future proof: Subviews into the shared arrays also share the mask
+        # See: https://stackoverflow.com/questions/41028253/numpy-1-13-maskedarrayfuturewarning-setting-an-item-on-a-masked-array-which-has
+        mean._sharedmask = False
+        sig._sharedmask = False
+        return mean, sig
 
     def cms_ratio(self):
         pass
 
+    def pair_acceptance(self):
+        acceptance = self.acceptance
+        acceptance = acceptance[None, :, None, :, None, :] | acceptance[:, None, :, None, None, :]
+        acceptance = np.broadcast_to(acceptance, self.pairs.shape)
+        return acceptance
 
-def vnn_div_vnvn(vnn, vn, vnn_sig, vn_sig):
+    def vnn_acceptance(self):
+        mask = utils.reduce_all_but(self.pair_acceptance(), [0, 1, 4, 5], np.all)
+        return mask
+
+
+def vnn_div_vnvn(vnn, vn, vnn_sig):
     """
     Compute the factorization ratio. It makes sense to do the
     factorization on the caller side, since its not apriori clear
     which phase-space regions to include.
+
+    The returned uncertainties are purely based on the uncertainties
+    of v_nn, not on the uncertainties of the fit v_n
 
     Returns
     -------
     ndarray : ratio
     ndarray : sigma of ratio
     """
-    vn_rel_sig = vn_sig / vn
+    # vn_rel_sig = vn_sig / vn
     vnn_rel_sig = vnn_sig / vnn
-    rel_sig = np.sqrt((vn_rel_sig[:, None, ...]**2 + vn_rel_sig[None, :, ...]**2) + vnn_rel_sig**2)
+    # rel_sig = np.sqrt((vn_rel_sig[:, None, ...]**2 + vn_rel_sig[None, :, ...]**2) + vnn_rel_sig**2)
     ratio = vnn / (vn[:, None, ...] * vn[None, :, ...])
-    return ratio, ratio * rel_sig
+    return ratio, ratio * vnn_rel_sig
 
 
 def _stich_all_eta(d):

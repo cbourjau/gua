@@ -205,6 +205,8 @@ def select_detector_region(a, eta_edges, reg1, reg2):
     reg1, reg2 : str
         Three letter abbrevation of the region {bwd, its, fwd}
     """
+    raise DeprecationWarning("Use of old `select_detector_region`;"
+                             "use `eta_idxs_detector_region` instead")
     bwd_its_edge = -1.7
     its_fwd_edge = 1.7
     ieta1s_ieta2s = []
@@ -224,6 +226,39 @@ def select_detector_region(a, eta_edges, reg1, reg2):
     eta1_slice = slice(ieta1s_ieta2s[0][0], ieta1s_ieta2s[0][-1] + 1)
     eta2_slice = slice(ieta1s_ieta2s[1][0], ieta1s_ieta2s[1][-1] + 1)
     return a[eta1_slice, eta2_slice, ...]
+
+
+def eta_idxs_detector_region(eta_edges, reg1, reg2):
+    """
+    Return eta indices for the specified detectors in the given ndarray.
+
+    Parameters
+    a : np.ndarray
+        shape must be (80, 80)
+    eta_edges : np.ndarray
+        Bin edges along eta; Note requirement of eta1 == eta2
+    reg1, reg2 : str
+        Three letter abbrevation of the region {bwd, its, fwd}
+    """
+    bwd_its_edge = -1.7
+    its_fwd_edge = 1.7
+    ieta1s_ieta2s = []
+    # if not (a.shape[0] == a.shape[1] == eta_edges.size - 1):
+    #     raise ValueError("Incompatible shape and eta edges!")
+    for reg in [reg1, reg2]:
+        if reg == 'bwd':
+            ieta1s_ieta2s.append(np.where(eta_edges < bwd_its_edge)[0])
+        elif reg == 'its':
+            ieta1s_ieta2s.append(np.where(np.logical_and(
+                bwd_its_edge <= eta_edges,
+                eta_edges < its_fwd_edge))[0])
+        elif reg == 'fwd':
+            ieta1s_ieta2s.append(np.where(eta_edges >= its_fwd_edge)[0])
+        else:
+            raise ValueError("Invalid region given!")
+    eta1_slice = slice(ieta1s_ieta2s[0][0], ieta1s_ieta2s[0][-1] + 1)
+    eta2_slice = slice(ieta1s_ieta2s[1][0], ieta1s_ieta2s[1][-1] + 1)
+    return eta1_slice, eta2_slice
 
 
 def get_dead_regions_map(eta_edges, phi_edges, z_edges, max_res_counts, max_res_edges):
