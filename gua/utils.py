@@ -282,6 +282,7 @@ def get_dead_regions_map(eta_edges, phi_edges, z_edges, max_res_counts, max_res_
     """
     def find_index(val, fine_edges):
         try:
+            # FIXME: This fails if we the fine bins are not a multiple of the corse ones!
             return np.where(np.round(fine_edges, 2) == np.round(val, 2))[0][0]
         except IndexError:
             return None

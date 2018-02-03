@@ -62,18 +62,23 @@ def generic_2d_no_cbar(a, edges1, edges2, ax, label=r'', a_label=r'', b_label=r'
                              vmin=kwargs.get('vmin', None),
                              vmax=kwargs.get('vmax', None))
     # Legend for invalid data if any
-    if np.any(np.isnan(a)) or np.ma.is_masked(a):
+    has_legend = False
+    if np.any(np.isnan(a)) or (np.ma.is_masked(a) and np.any(~a.mask)):
         nan_color = 'gray'
-        ax.patch.set(hatch='xx', facecolor=nan_color)
+        ax.patch.set(facecolor=nan_color)
         patch_label = mpl.patches.Patch(color=nan_color, label='No data')
         ax.legend(handles=[patch_label], loc='upper left')
+        has_legend = True
     # its row - colum order in numpy!
     ax.set_xlabel(b_label)
     ax.set_ylabel(a_label)
     ax.minorticks_on()
     if kwargs.get('title', None):
         plt.title(kwargs.get('title', None))
-    plt.legend()
+    if has_legend:
+        # Otherwise, we get a warning and an empty legend box
+        # ax.legend()
+        pass
     return mappable
 
 
