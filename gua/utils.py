@@ -298,3 +298,8 @@ def get_dead_regions_map(eta_edges, phi_edges, z_edges, max_res_counts, max_res_
                 slice_z = slice(find_index(low_z, fine_zs), find_index(up_z, fine_zs))
                 mask[i, j, k] = np.min(fine_vals[slice_eta, slice_phi, slice_z]) > 0
     return mask
+
+
+def edges2centers(edges):
+    centers = [np.mean([e1, e2]) for (e1, e2) in zip(edges[:-1], edges[1:])]
+    return np.array(centers)

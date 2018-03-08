@@ -7,7 +7,7 @@ from rootstrap import Collector
 
 
 class Gua():
-    def __init__(self, fname, cent_bins):
+    def __init__(self, fname, cent_bins, hack_hires_z_issue=False):
         self.singles, edges = get_singles_and_edges(fname, cent_bins)
         self.pairs = get_pairs(fname, cent_bins)
         self.evt_counter = get_n_events(fname, cent_bins)
@@ -15,6 +15,19 @@ class Gua():
         self.phi_edges = edges[1]
         self.z_edges = edges[-1]
         max_res_map, max_res_edges = get_max_res_map(fname)
+        # FIXME: hack around hi-res map not being hir res enough in z:
+        # Double bins of max_res_map in z; fill each second bin with the old map
+        if hack_hires_z_issue:
+            _max_res_map = np.full((max_res_map.shape[:2] + (max_res_map.shape[2] * 2, )), False)
+            _max_res_map[:, :, ::2] = max_res_map
+            _max_res_map[:, :, 1::2] = max_res_map
+            max_res_map = _max_res_map
+            # FIXME: more hack to double the edges
+            max_res_z_edges = np.ones((max_res_edges[2].size * 2 - 1, ),
+                                      dtype=np.float)
+            max_res_z_edges[:] = np.linspace(max_res_edges[-1][0], max_res_edges[-1][-1],
+                                             num=max_res_z_edges.size)
+            max_res_edges[2] = max_res_z_edges
         # False == Dead
         self.acceptance = ~utils.get_dead_regions_map(edges[0], edges[1], edges[-1],
                                                       max_res_map, max_res_edges)
@@ -31,8 +44,13 @@ class Gua():
         r2[self.pairs > 0] = self.pairs[self.pairs > 0] / ss[self.pairs > 0]
         r2 *= self.evt_counter
 
+        # disable the diagonal in (eta, eta) FIXME: Should only be the phi-phi diagonal!
+        eta_diag_idx = np.diag_indices(r2.shape[0])
+        r2[eta_diag_idx[0], eta_diag_idx[1], ...] = np.nan
+
         # Mask parts that overlap with dead regions
-        r2 = np.ma.masked_array(r2, mask=self.pair_acceptance())
+        # Copy the mask so that it can be later modified!~
+        r2 = np.ma.masked_array(r2, mask=np.copy(self.pair_acceptance()))
 
         # Normalize each cent-z-slice
         # eta_width = self.eta_edges[1] - self.eta_edges[0]
@@ -43,11 +61,12 @@ class Gua():
         # Compute uncertainties based on pairs
         sig_rel = np.full_like(r2, np.nan)
         with np.errstate(divide='ignore', invalid='ignore'):
-            sig_rel[~np.isnan(r2)] = 1.0 / np.sqrt(self.pairs[~np.isnan(r2)])
+            # square of uncert of single dists (1/sqrt(s))^2 each; thus no np.sqrt in the terms
+            # rel_singles_uncert2 = (1.0 / self.singles[:, None, :, None, ...] +
+            #                        1.0 / self.singles[None, :, None, :, ...])
+            # Rel. uncertainty of r2 is approximately given by 1/pairs
+            sig_rel[~np.isnan(r2)] = np.sqrt((1.0 / self.pairs)[~np.isnan(r2)])
         sigma_abs = r2 * sig_rel
-        # disable the diagonal in (eta, eta) FIXME: Should only be the phi-phi diagonal!
-        eta_diag_idx = np.diag_indices(r2.shape[0])
-        r2[eta_diag_idx[0], eta_diag_idx[1], ...] = np.nan
         # Set values where we do not have a r2
         sigma_abs[np.isnan(r2)] = np.nan
         sigma_abs = np.ma.masked_array(sigma_abs, mask=self.pair_acceptance())
