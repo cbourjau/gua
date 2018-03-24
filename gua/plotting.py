@@ -90,12 +90,26 @@ def generic_2d(a, edges1, edges2, ax=None, label=r'', a_label=r'', b_label=r'', 
         ax = plt.subplot(gs[:, :-1])
         cax = plt.subplot(gs[:, -1:])
     mappable = generic_2d_no_cbar(a, edges1, edges2, ax, label, a_label, b_label, **kwargs)
+    # figure out if vmin/vmax covers the full range of `a`
+    vmin, vmax = kwargs.get("vmin"), kwargs.get("vmax")
+    if vmin is not None or vmax is not None:
+        amin, amax = np.nanmin(a), np.nanmax(a)
+        if amin < vmin and amax > vmax:
+            extend = 'both'
+        elif amin < vmin and amax <= vmax:
+            extend = 'min'
+        elif amin >= vmin and amax <= vmax:
+            extend = 'neither'
+        elif amin >= vmin and amax > vmax:
+            extend = 'max'
+    else:
+        extend = 'neither'
     if cax is None:
         # allocates the colorbar axis; (extending the figure?)
         # numbers are magic to make the cbar have the same hight as the plot
-        plt.colorbar(mappable, fraction=0.046, pad=0.03, label=label)
+        plt.colorbar(mappable, fraction=0.046, pad=0.03, label=label, extend=extend)
     else:
-        plt.colorbar(mappable, label=label, cax=cax)
+        plt.colorbar(mappable, label=label, cax=cax, extend=extend)
     return ax
 
 
