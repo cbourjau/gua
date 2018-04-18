@@ -7,18 +7,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
-from rootpy.plotting import Hist2D, Canvas, Pad
-from root_numpy import array2hist
-
-from ROOT import TLatex, gStyle
-
-from c2_post import utils
-
+from . import utils
 
 # Latex Book: \textwidth = 390pt
 # 1pt = 72.72 pt/inch
 # in my thesis: 4.9823
 TEXT_WIDTH = 4.9823
+FIGSIZE = (TEXT_WIDTH / 2 * 1.35, TEXT_WIDTH / 2)
 
 
 def load_matplotlib_defaults():
@@ -49,6 +44,37 @@ load_matplotlib_defaults()
 
 def restore_matplotlib_defaults():
     mpl.rcParams.update(mpl.rcParamsDefault)
+
+
+def setup_2d_fig():
+    """
+    Setup a figure with reasonable size used for the phi-phi and eta-eta plots
+    """
+    fig = plt.figure(figsize=FIGSIZE)
+    gs = mpl.gridspec.GridSpec(14, 15, wspace=0.2, top=0.85, bottom=0.16, left=0.17, right=0.8, )
+    fig.tight_layout()
+    ax = plt.subplot(gs[:, :-1], )
+    cax = plt.subplot(gs[:, -1:])
+    return fig, ax, cax
+
+
+def setup_1d_fig():
+    """Setup a figure with reasonable defaults for a 1D plot"""
+    fig, ax = plt.subplots(figsize=(TEXT_WIDTH / 2 * 1.6, TEXT_WIDTH / 2))
+    fig.tight_layout()
+    return fig, ax
+
+
+def mult_bin_label(cent1, cent2):
+    """Pritty string showing the multiplicity bin e.g. `5--10\% `"""
+    return r'{:.0f}--{:.0f}\% '.format(cent1, cent2)
+
+
+def title_2d(cent1, cent2):
+    """
+    Figure title for 2d plots: `Pb--Pb 5--10\% $\sqrt{s_{\mathrm{NN}}}=5.02$ TeV`
+    """
+    return (r'Pb--Pb $\sqrt{s_{\mathrm{NN}}}=5.02$ TeV ' + mult_bin_label(cent1, cent2))
 
 
 def generic_2d_no_cbar(a, edges1, edges2, ax, label=r'', a_label=r'', b_label=r'', **kwargs):
@@ -119,7 +145,7 @@ def prettify_phi_axis(axis):
     """
     axis.set_major_locator(plt.MultipleLocator(np.pi / 2))
     axis.set_minor_locator(plt.MultipleLocator(np.pi / 4))
-    axis.set_major_formatter(plt.FuncFormatter(format_func))
+    axis.set_major_formatter(plt.FuncFormatter(_format_func))
 
 
 def plot_dphi(a, centers, ax=None, sigma=None, **kwargs):
@@ -186,7 +212,7 @@ def plot_cms(alice_icent, hcal_iseg, ax=None):
     ax.errorbar(xval, yval, yerr=yerr, label=label, ls='None', marker='s')
 
 
-def format_func(value, tick_number):
+def _format_func(value, tick_number):
     """Find number of multiples of pi/2
 
     See: https://jakevdp.github.io/PythonDataScienceHandbook/04.10-customizing-ticks.html
@@ -202,3 +228,60 @@ def format_func(value, tick_number):
         return r"${0}\pi/2$".format(N)
     else:
         return r"${0}\pi$".format(N // 2)
+
+
+def _augment_fit_area(ax, eta_edges, ngap, exclude_fmd):
+    """Visualize the (eta_a, eta_b)-region used for the fit"""
+    _red = r'#e41a1c'
+    _orange = r'#ff7f00'
+
+    ax.pcolor(eta_edges, eta_edges, np.ma.where(utils.deta_mask(eta_edges, ngap).mask, 1, np.nan),
+              facecolor='none', linewidth=0, alpha=1, edgecolor=_orange,
+              hatch=r'||')
+    arrowprops = dict(arrowstyle="-",
+                      edgecolor=_orange,
+                      linewidth=2,
+                      alpha=0.5,
+                      connectionstyle="arc3,rad=0.")
+    ax.annotate("",
+                xy=(eta_edges[ngap], eta_edges[0]), xycoords='data',
+                xytext=(eta_edges[-1], eta_edges[-(ngap + 1)]), textcoords='data',
+                arrowprops=arrowprops)
+    ax.annotate("",
+                xy=(eta_edges[0], eta_edges[ngap]), xycoords='data',
+                xytext=(eta_edges[-(ngap + 1)], eta_edges[-1]), textcoords='data',
+                arrowprops=arrowprops)
+    # Define legend handles
+    handles = []
+    handles.append(mpl.patches.Patch(color='gray', label='No data'))
+
+    handles.append(mpl.patches.Patch(facecolor='none', edgecolor=_orange,
+                                     linewidth=0, hatch=r'++',
+                                     label='Excluded from fit'))
+    if exclude_fmd:
+        ax.pcolor(eta_edges, eta_edges,
+                  np.ma.where(~utils.fmd_mask(eta_edges), np.nan, 1), facecolor='none',
+                  linewidth=0, alpha=0.9, edgecolor=_red,
+                  hatch=r'\\\\')
+        handles.append(mpl.patches.Patch(facecolor='none', edgecolor=_red,
+                                         linewidth=0, hatch=r'\\\\',
+                                         label='Detector effects'))
+    leg = ax.legend(handles=handles,
+                    # title=r'\textbf{ALICE Simulation}',
+                    loc='upper left')
+    leg.get_title().set_fontsize('small')
+
+
+def plot_fact_ratio(ratio, eta_edges, n, cent, nbins_deta_gap, exclude_fmd, vmin=0.92, vmax=1.08):
+    # area excluded for factorization
+    fig, ax, cax = setup_2d_fig()
+    # merged_ratio = mirror_tri(merged_ratio)
+    label = r'$f_{%i}(\eta_a, \eta_b)$' % n
+    if nbins_deta_gap > 0:
+        label += r' for $|\Delta\eta| > %.1f$' % (0.2 * nbins_deta_gap)
+    generic_2d(ratio, eta_edges, eta_edges, ax=ax,
+               cax=cax, cmap='RdBu', vmin=vmin, vmax=vmax,
+               a_label=r'$\eta_a$', b_label=r'$\hspace{1.5em} \eta_b$',
+               label=label)
+    _augment_fit_area(ax, eta_edges, nbins_deta_gap, exclude_fmd=exclude_fmd)
+    return fig, ax

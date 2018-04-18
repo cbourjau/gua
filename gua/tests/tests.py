@@ -27,25 +27,25 @@ class Test_analysis(TestCase):
         # check dead regions
         self.assertEqual(self.gua.dead_regions.shape, (40, 20, 8))
 
-    def test_rho2(self):
-        rho2, sigma = self.gua.rho2()
+    def test_r2(self):
+        r2, sigma = self.gua.r2()
         eta_width = self.gua.eta_edges[1] - self.gua.eta_edges[0]
         phi_width = self.gua.phi_edges[1] - self.gua.phi_edges[0]
         # integral over eta1, eta2, phi1, phi2 should be ~1
-        self.assertAlmostEqual(np.nansum(rho2[..., 0, 0]) * eta_width**2 * phi_width**2, 1, places=5)
-        np.testing.assert_array_equal(rho2.shape, sigma.shape)
+        self.assertAlmostEqual(np.nansum(r2[..., 0, 0]) * eta_width**2 * phi_width**2, 1, places=5)
+        np.testing.assert_array_equal(r2.shape, sigma.shape)
         # NaN values should be at the same place in both cases
-        np.testing.assert_array_equal(np.isnan(rho2), np.isnan(sigma))
+        np.testing.assert_array_equal(np.isnan(r2), np.isnan(sigma))
 
-    def test_rho2_dphi(self):
-        rho2, sigma = self.gua.rho2_dphi()
+    def test_r2_dphi(self):
+        r2, sigma = self.gua.r2_dphi()
         eta_width = self.gua.eta_edges[1] - self.gua.eta_edges[0]
         dphi_width = self.gua.phi_edges[1] - self.gua.phi_edges[0]
         # integral over eta1, eta2, dphi should be ~1
-        self.assertAlmostEqual(np.nansum(rho2[..., 0, 0]) * eta_width**2 * dphi_width, 1, places=5)
-        np.testing.assert_array_equal(rho2.shape, sigma.shape)
+        self.assertAlmostEqual(np.nansum(r2[..., 0, 0]) * eta_width**2 * dphi_width, 1, places=5)
+        np.testing.assert_array_equal(r2.shape, sigma.shape)
         # NaN values should be at the same place in both cases
-        np.testing.assert_array_equal(np.isnan(rho2), np.isnan(sigma))
+        np.testing.assert_array_equal(np.isnan(r2), np.isnan(sigma))
 
     def test_vnm(self):
         vnm, sigma = self.gua.vnm(n_boot=10)

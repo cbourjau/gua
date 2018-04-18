@@ -1,5 +1,8 @@
+import logging
 import warnings
 import numpy as np
+
+from c2_post.vn_extractors.factorization import find_v, find_v2_twist
 
 
 def _flatten(container):
@@ -184,6 +187,66 @@ def uncert_weighted_avg(sigmas, axis):
     return 1 / np.sqrt(nansum)
 
 
+def weighted_mean(a, sigmas, **kwargs):
+    """
+    Compute the weighted arithmetic mean. `kwargs` are the same like np.nansum
+    """
+    w = 1 / sigmas**2
+    return np.nansum(w * a, **kwargs) / np.nansum(w, **kwargs)
+
+
+def weighted_std(a, sigmas, axis):
+    """
+    Weighted estimate of the standard deviation. This does not assume that each point is compatible with each other.
+
+    https://en.wikipedia.org/wiki/Weighted_arithmetic_mean#Weighted_sample_variance
+
+    Parameters
+    ----------
+    a: ndarray
+        Array of measured quantity
+    sigmas : ndarray
+        Standard deviation of each point in `a`
+    axis : int
+        Axis along which the weighted std is computed
+
+    Returns
+    -------
+    ndarray : Weighted std of a along `axis`
+    """
+    # convert sigma to weights
+    w = 1 / sigmas**2
+    sum_w = np.nansum(w, axis)
+    sum_w2 = np.nansum(w**2, axis)
+    # keep the axis for broadcasting in the next step
+    weighted_mean = np.nansum(w * a, axis, keepdims=True) / np.nansum(w, axis, keepdims=True)
+    s2 = (np.nansum(w * (a - weighted_mean)**2, axis) /
+          (sum_w - sum_w2 / sum_w))
+    return np.sqrt(s2)
+
+
+def merge_to_deta(a, sig):
+    """
+    Perform the coordinate transformation of eta_a and eta_b and merge
+    along the "average-dimension". Expects the shape (eta, eta, ...)
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Array of the measured quantity; shape=(eta, eta, ...)
+    sig : np.ndarray
+        Uncertainties of `a`; shape=(eta, eta, ...)
+
+    Returns
+    -------
+    (np.array, np.array) : a_deta, sig_deta
+        Merged values and uncertainties; shape=(deta, x, y, )
+    """
+    ratio_deta = reduce_weighted_avg(a, sig, [[0, 1], ] + range(2, a.ndim))
+    ratio_deta_sig = reduce_all_but(sig, [[0, 1], ] + range(2, a.ndim), uncert_weighted_avg)
+    return ratio_deta, ratio_deta_sig
+
+
 def find_bin(edges, v):
     """Find the bin where `v` falls into"""
     if v < edges[0] or v > edges[-1]:
@@ -303,3 +366,193 @@ def get_dead_regions_map(eta_edges, phi_edges, z_edges, max_res_counts, max_res_
 def edges2centers(edges):
     centers = [np.mean([e1, e2]) for (e1, e2) in zip(edges[:-1], edges[1:])]
     return np.array(centers)
+
+
+def ratio_pure(vnn, vn, vnn_sig):
+    """
+    Compute the factorization ratio for pure factorization. It makes sense to do the
+    factorization on the caller side, since its not apriori clear
+    which phase-space regions to include.
+
+    The returned uncertainties are purely based on the uncertainties
+    of v_nn, not on the uncertainties of the fit v_n
+
+    Returns
+    -------
+    ndarray : ratio
+    ndarray : sigma of ratio
+    """
+    # vn_rel_sig = vn_sig / vn
+    vnn_rel_sig = vnn_sig / vnn
+    # rel_sig = np.sqrt((vn_rel_sig[:, None, ...]**2 + vn_rel_sig[None, :, ...]**2) + vnn_rel_sig**2)
+    ratio = vnn / (vn[:, None, ...] * vn[None, :, ...])
+    return ratio, ratio * vnn_rel_sig
+
+
+def ratio_twist_v2(vnn, vnn_sig, vn, twist, eta_edges):
+    """
+    Ratio of measurement to fit for the twist model; v2 only!
+    Returns
+    -------
+    (ratio, ratio_sig): (nd.array, ndarray)
+        Each has shape (eta, eta, cent, z); NOTE: no `n`!!!
+    """
+    vnn_rel_sig = vnn_sig / vnn
+    ratio = vnn[:, :, 2, ...] / (vn[:, None, ...] * vn[None, :, ...])
+    # Broadcast to z-dimension
+    ratio *= _exp_twist(twist, eta_edges)[:, :, :, None]
+    # should include twist uncert?
+    ratio_sig = ratio * vnn_rel_sig[:, :, 2, ...]
+    return ratio, ratio_sig
+
+
+def mask_diagonal(a, k=10):
+    """
+    Return a copy of `a` where the (lower) diagonal is set to NaN
+    """
+    import warnings
+    warnings.warn("Use `deta_mask` instead!", DeprecationWarning)
+    # eta gap
+    # k = 20 # eta width 0.1
+    # k = 15 # eta width 0.2
+    a = np.copy(a)
+    indices = np.tril_indices(n=a.shape[0], m=a.shape[1], k=k)
+    a[indices[0], indices[1], ...] = np.nan
+    return a
+
+
+def fmd_mask(eta_edges):
+    """
+    Mask for the short range FMD region in the (eta_a, eta_b)-plane. Masked == True
+    """
+    shape = (eta_edges.size - 1, eta_edges.size - 1)
+    fmds_mask = np.full(shape, fill_value=np.False_)
+    idxs_eta1, idxs_eta2 = eta_idxs_detector_region(eta_edges, 'fwd', 'fwd')
+    fmds_mask[idxs_eta1, idxs_eta2] = True
+    idxs_eta1, idxs_eta2 = eta_idxs_detector_region(eta_edges, 'bwd', 'bwd')
+    fmds_mask[idxs_eta1, idxs_eta2] = True
+    # retunr as masked array for easier plotting
+    return fmds_mask
+
+
+def kth_diag_indices(n, k):
+    rows, cols = np.diag_indices(n)
+    if k < 0:
+        return rows[-k:], cols[:k]
+    elif k > 0:
+        return rows[:-k], cols[k:]
+    else:
+        return rows, cols
+
+
+def deta_mask(eta_edges, nbins_deta_gap):
+    """
+    Return a mask, where the `|\Delta\eta| < k*\eta-binwidth` is `True`
+    """
+    eta_eta_shape = (eta_edges.size - 1, eta_edges.size - 1)
+    excld_mask = np.full(eta_eta_shape, fill_value=np.False_)
+    for k in range(-nbins_deta_gap, nbins_deta_gap + 1):
+        eta_1, eta_2 = kth_diag_indices(eta_eta_shape[0], k)
+        excld_mask[eta_1, eta_2, ...] = True
+    # retunr as masked array for easier plotting
+    return np.ma.masked_where(excld_mask, excld_mask)
+
+
+def _exp_twist(twist, eta_edges):
+    """Compute `e^{-twist * |eta_1 - eta_2|}
+
+    Parameters
+    ----------
+    twist: np.array
+        Empircal twist parameter vs. cent
+    eta_edges: np.array
+        eta edges used in ananlysis
+
+    Returns
+    -------
+    np.ndarray:
+        Decorrelation value on the (eta_a, eta_b, cent)-grid
+    """
+    eta_centers = edges2centers(eta_edges)
+    detas = np.abs(eta_centers[:, None] - eta_centers[None, :])
+    return np.exp(twist[None, None, :] * detas[:, :, None])
+
+
+def fact_ratio(vnn, vnn_sig, eta_edges, nbins_deta_gap, with_twist,
+               exclude_short_range_fmd):
+    fact_me = np.copy(vnn.data)
+    fact_me[vnn.mask] = np.nan
+    if exclude_short_range_fmd:
+        (eta1_idxs, eta2_idxs) = eta_idxs_detector_region(eta_edges, 'bwd', 'bwd')
+        fact_me[eta1_idxs, eta2_idxs, ...] = np.nan
+        (eta1_idxs, eta2_idxs) = eta_idxs_detector_region(eta_edges, 'fwd', 'fwd')
+        fact_me[eta1_idxs, eta2_idxs, ...] = np.nan
+
+    fact_me = mask_diagonal(fact_me, k=nbins_deta_gap)
+    if not with_twist:
+        vn, _vn_sig = find_v(fact_me, sigma=vnn_sig)
+        ratio, ratio_sig = vnn_div_vnvn(vnn, vn, vnn_sig)
+        ratio = ratio[:, :, 2, ...]
+        ratio_sig = ratio_sig[:, :, 2, ...]
+    else:
+        (vn, twist), (vn_sig, twist_sig) = find_v2_twist(fact_me, vnn_sig, )
+        ratio, ratio_sig = vnn_div_vnvn(vnn[:, :, 2, ...], vn, vnn_sig[:, :, 2, ...])
+        # multiply with the exp-part
+        eta_centers = edges2centers(eta_edges)
+        detas = np.abs(eta_centers[:, None] - eta_centers[None, :])
+        ratio *= np.exp(twist[None, None, :, None] * detas[:, :, None, None])
+    return ratio, ratio_sig
+
+
+def compute_pure_vns(vnn, vnn_sig, eta_edges, exclude_fmd, gaps_nbins):
+    """
+    Compute v_n pure-factorization-model
+
+    Expects numpy array; not masked arrays!
+    """
+    logging.info("computing vns")
+    if isinstance(vnn, np.ma.MaskedArray):
+        vnn = np.ma.filled(vnn, np.nan)
+    if isinstance(vnn_sig, np.ma.MaskedArray):
+        vnn = np.ma.filled(vnn_sig, np.nan)
+
+    vns, vns_sig = [], []
+    for nbins in gaps_nbins:
+        fact_me = np.copy(vnn)
+        fact_me[deta_mask(eta_edges, nbins), ...] = np.nan
+
+        if exclude_fmd:
+            fact_me[fmd_mask(eta_edges), ...] = np.nan
+
+        vn, vn_sig = find_v(fact_me, sigma=vnn_sig, )
+        vns.append(vn)
+        vns_sig.append(vn_sig)
+    return np.array(vns), np.array(vns_sig)
+
+
+def compute_twist_v2s(vnn, vnn_sig, eta_edges, exclude_fmd, gaps_nbins, nstraps=5):
+    """
+    Compute v_2 and the event plane twist with the twist-model
+    """
+    logging.info("computing vns with twist model")
+    if isinstance(vnn, np.ma.MaskedArray):
+        vnn = np.ma.filled(vnn, np.nan)
+    if isinstance(vnn_sig, np.ma.MaskedArray):
+        vnn = np.ma.filled(vnn_sig, np.nan)
+    v2s, v2s_sig = [], []
+    twists, twists_sig = [], []
+
+    for nbins in gaps_nbins:
+        fact_me = np.copy(vnn)
+        fact_me[deta_mask(eta_edges, nbins), ...] = np.nan
+
+        if exclude_fmd:
+            fact_me[fmd_mask(eta_edges), ...] = np.nan
+
+        # Twist currently only implemented for n=2!!!!!!! OBS: Shape has no `n`!!!
+        (v2, twist), (v2_sig, twist_sig) = find_v2_twist(fact_me, vnn_sig=vnn_sig, eta_edges=eta_edges, nstraps=nstraps)
+        v2s.append(v2)
+        v2s_sig.append(v2s_sig)
+        twists.append(twist)
+        twists_sig.append(twist_sig)
+    return np.array(v2s), twists, np.array(v2s_sig), twists_sig

@@ -35,6 +35,28 @@ class Gua():
         self.deta_edges = None
         self.cent_bins = cent_bins
 
+    def merge_with_low_mult(self, low_mult):
+        """
+        Merge two GUA objects along their centrality axis
+
+        Parameters
+        ----------
+        low_mult: nd.array
+            `Gua` object with low multipicity
+        """
+        print self.singles.shape, low_mult.singles.shape
+        self.singles = np.concatenate((self.singles, low_mult.singles), -2)
+        self.pairs = np.concatenate((self.pairs, low_mult.pairs), -2)
+        self.evt_counter = np.concatenate((self.evt_counter, low_mult.evt_counter), -2)
+        self.cent_bins = self.cent_bins + low_mult.cent_bins
+
+    def _r2_sig2(self):
+        s = self.singles / self.evt_counter
+        s_sig = np.sqrt(self.singles) / self.evt_counter
+        p = self.pairs / self.evt_counter
+        r2 = p / (s[None, :, None, :, ...] * s[:, None, :, None, ...])
+        return (r2 - 1)**2 * ((s_sig / s)[None, :, None, :, ...]**2 + (s_sig / s)[:, None, :, None, ...]**2 + 2 * (r2 - 1))
+
     def r2(self):
         """
         Compute the normalized pair probability distribution and its uncertainties
@@ -112,7 +134,21 @@ class Gua():
             col.add(vnm)
         return col.mean(), col.sigma()
 
-    def vnn_from_dphi(self, n_boot=100):
+    def vnn_from_dphi(self, n_max=4, n_boot=100):
+        """
+        Two-particle Fourier coefficients with errors propagated by bootstrapping.
+        Parameters
+        ----------
+        n_max: int
+            Highes `n` included in the output
+        n_boot: int
+            Number of bootstrapping iterations
+
+        Returns
+        -------
+        vnn, vnn_sig:
+            MaskedArrays `v_nn` and the absolut uncertainties of shape (eta, eta, n, cent, z)
+        """
         col = Collector()
         r2, sig = self.r2_dphi()
         for _ in range(n_boot):
@@ -133,7 +169,7 @@ class Gua():
         # See: https://stackoverflow.com/questions/41028253/numpy-1-13-maskedarrayfuturewarning-setting-an-item-on-a-masked-array-which-has
         mean._sharedmask = False
         sig._sharedmask = False
-        return mean, sig
+        return mean[:, :, :n_max + 1, ...], sig[:, :, :n_max + 1, ...]
 
     def cms_ratio(self):
         pass
@@ -147,27 +183,6 @@ class Gua():
     def vnn_acceptance(self):
         mask = utils.reduce_all_but(self.pair_acceptance(), [0, 1, 4, 5], np.all)
         return mask
-
-
-def vnn_div_vnvn(vnn, vn, vnn_sig):
-    """
-    Compute the factorization ratio. It makes sense to do the
-    factorization on the caller side, since its not apriori clear
-    which phase-space regions to include.
-
-    The returned uncertainties are purely based on the uncertainties
-    of v_nn, not on the uncertainties of the fit v_n
-
-    Returns
-    -------
-    ndarray : ratio
-    ndarray : sigma of ratio
-    """
-    # vn_rel_sig = vn_sig / vn
-    vnn_rel_sig = vnn_sig / vnn
-    # rel_sig = np.sqrt((vn_rel_sig[:, None, ...]**2 + vn_rel_sig[None, :, ...]**2) + vnn_rel_sig**2)
-    ratio = vnn / (vn[:, None, ...] * vn[None, :, ...])
-    return ratio, ratio * vnn_rel_sig
 
 
 def _stich_all_eta(d):
@@ -211,7 +226,13 @@ def get_pairs(fname, cent_bins):
             all_cents.append(_stich_all_eta(d))
     out = np.concatenate(all_cents, axis=-2)
     # treat Nan values as 0; strange that they are there!
-    out[np.isnan(out)] = 0
+    if np.any(np.isnan(out)):
+        print "Found NaN in pure pair histogram!?"
+        # out[np.isnan(out)] = 0
+    eta1, eta2 = np.tril_indices(out.shape[0])
+    out[eta1, eta2, ...] = 0  # out[np.tril_indices(out.shape[0]), ...][::-1]
+    out += np.swapaxes(np.swapaxes(out, 0, 1), 2, 3)
+    # mirror the lower triangle (eta_a < eta_b) to the upper one
     # kill unused pt dimension
     return out[..., 0, :, :]
 
