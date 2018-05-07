@@ -7,27 +7,30 @@ from rootstrap import Collector
 
 
 class Gua():
-    def __init__(self, fname, cent_bins, hack_hires_z_issue=False):
+    def __init__(self, fname, cent_bins, external_acceptance_file=None):
         self.singles, edges = get_singles_and_edges(fname, cent_bins)
         self.pairs = get_pairs(fname, cent_bins)
         self.evt_counter = get_n_events(fname, cent_bins)
         self.eta_edges = edges[0]
         self.phi_edges = edges[1]
         self.z_edges = edges[-1]
-        max_res_map, max_res_edges = get_max_res_map(fname)
+        if external_acceptance_file:
+            max_res_map, max_res_edges = get_max_res_map(external_acceptance_file)
+        else:
+            max_res_map, max_res_edges = get_max_res_map(fname)
         # FIXME: hack around hi-res map not being hir res enough in z:
         # Double bins of max_res_map in z; fill each second bin with the old map
-        if hack_hires_z_issue:
-            _max_res_map = np.full((max_res_map.shape[:2] + (max_res_map.shape[2] * 2, )), False)
-            _max_res_map[:, :, ::2] = max_res_map
-            _max_res_map[:, :, 1::2] = max_res_map
-            max_res_map = _max_res_map
-            # FIXME: more hack to double the edges
-            max_res_z_edges = np.ones((max_res_edges[2].size * 2 - 1, ),
-                                      dtype=np.float)
-            max_res_z_edges[:] = np.linspace(max_res_edges[-1][0], max_res_edges[-1][-1],
-                                             num=max_res_z_edges.size)
-            max_res_edges[2] = max_res_z_edges
+        # if external_acceptance_file:
+        #     _max_res_map = np.full((max_res_map.shape[:2] + (max_res_map.shape[2] * 2, )), False)
+        #     _max_res_map[:, :, ::2] = max_res_map
+        #     _max_res_map[:, :, 1::2] = max_res_map
+        #     max_res_map = _max_res_map
+        #     # FIXME: more hack to double the edges
+        #     max_res_z_edges = np.ones((max_res_edges[2].size * 2 - 1, ),
+        #                               dtype=np.float)
+        #     max_res_z_edges[:] = np.linspace(max_res_edges[-1][0], max_res_edges[-1][-1],
+        #                                      num=max_res_z_edges.size)
+        #     max_res_edges[2] = max_res_z_edges
         # False == Dead
         self.acceptance = ~utils.get_dead_regions_map(edges[0], edges[1], edges[-1],
                                                       max_res_map, max_res_edges)

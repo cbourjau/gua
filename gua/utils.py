@@ -368,7 +368,7 @@ def edges2centers(edges):
     return np.array(centers)
 
 
-def ratio_pure(vnn, vn, vnn_sig):
+def ratio_pure(vnn, vn, vnn_sig, vn_sig):
     """
     Compute the factorization ratio for pure factorization. It makes sense to do the
     factorization on the caller side, since its not apriori clear
@@ -382,11 +382,11 @@ def ratio_pure(vnn, vn, vnn_sig):
     ndarray : ratio
     ndarray : sigma of ratio
     """
-    # vn_rel_sig = vn_sig / vn
+    vn_rel_sig = vn_sig / vn
     vnn_rel_sig = vnn_sig / vnn
-    # rel_sig = np.sqrt((vn_rel_sig[:, None, ...]**2 + vn_rel_sig[None, :, ...]**2) + vnn_rel_sig**2)
+    rel_sig = np.sqrt((vn_rel_sig[:, None, ...]**2 + vn_rel_sig[None, :, ...]**2) + vnn_rel_sig**2)
     ratio = vnn / (vn[:, None, ...] * vn[None, :, ...])
-    return ratio, ratio * vnn_rel_sig
+    return ratio, ratio * rel_sig  # vnn_rel_sig
 
 
 def ratio_twist_v2(vnn, vnn_sig, vn, twist, eta_edges):
@@ -400,7 +400,7 @@ def ratio_twist_v2(vnn, vnn_sig, vn, twist, eta_edges):
     vnn_rel_sig = vnn_sig / vnn
     ratio = vnn[:, :, 2, ...] / (vn[:, None, ...] * vn[None, :, ...])
     # Broadcast to z-dimension
-    ratio *= _exp_twist(twist, eta_edges)[:, :, :, None]
+    ratio *= exp_twist(twist, eta_edges)[:, :, :, None]
     # should include twist uncert?
     ratio_sig = ratio * vnn_rel_sig[:, :, 2, ...]
     return ratio, ratio_sig
@@ -458,7 +458,7 @@ def deta_mask(eta_edges, nbins_deta_gap):
     return np.ma.masked_where(excld_mask, excld_mask)
 
 
-def _exp_twist(twist, eta_edges):
+def exp_twist(twist, eta_edges):
     """Compute `e^{-twist * |eta_1 - eta_2|}
 
     Parameters
@@ -478,30 +478,30 @@ def _exp_twist(twist, eta_edges):
     return np.exp(twist[None, None, :] * detas[:, :, None])
 
 
-def fact_ratio(vnn, vnn_sig, eta_edges, nbins_deta_gap, with_twist,
-               exclude_short_range_fmd):
-    fact_me = np.copy(vnn.data)
-    fact_me[vnn.mask] = np.nan
-    if exclude_short_range_fmd:
-        (eta1_idxs, eta2_idxs) = eta_idxs_detector_region(eta_edges, 'bwd', 'bwd')
-        fact_me[eta1_idxs, eta2_idxs, ...] = np.nan
-        (eta1_idxs, eta2_idxs) = eta_idxs_detector_region(eta_edges, 'fwd', 'fwd')
-        fact_me[eta1_idxs, eta2_idxs, ...] = np.nan
+# def fact_ratio(vnn, vnn_sig, eta_edges, nbins_deta_gap, with_twist,
+#                exclude_short_range_fmd):
+#     fact_me = np.copy(vnn.data)
+#     fact_me[vnn.mask] = np.nan
+#     if exclude_short_range_fmd:
+#         (eta1_idxs, eta2_idxs) = eta_idxs_detector_region(eta_edges, 'bwd', 'bwd')
+#         fact_me[eta1_idxs, eta2_idxs, ...] = np.nan
+#         (eta1_idxs, eta2_idxs) = eta_idxs_detector_region(eta_edges, 'fwd', 'fwd')
+#         fact_me[eta1_idxs, eta2_idxs, ...] = np.nan
 
-    fact_me = mask_diagonal(fact_me, k=nbins_deta_gap)
-    if not with_twist:
-        vn, _vn_sig = find_v(fact_me, sigma=vnn_sig)
-        ratio, ratio_sig = vnn_div_vnvn(vnn, vn, vnn_sig)
-        ratio = ratio[:, :, 2, ...]
-        ratio_sig = ratio_sig[:, :, 2, ...]
-    else:
-        (vn, twist), (vn_sig, twist_sig) = find_v2_twist(fact_me, vnn_sig, )
-        ratio, ratio_sig = vnn_div_vnvn(vnn[:, :, 2, ...], vn, vnn_sig[:, :, 2, ...])
-        # multiply with the exp-part
-        eta_centers = edges2centers(eta_edges)
-        detas = np.abs(eta_centers[:, None] - eta_centers[None, :])
-        ratio *= np.exp(twist[None, None, :, None] * detas[:, :, None, None])
-    return ratio, ratio_sig
+#     fact_me = mask_diagonal(fact_me, k=nbins_deta_gap)
+#     if not with_twist:
+#         vn, _vn_sig = find_v(fact_me, sigma=vnn_sig)
+#         ratio, ratio_sig = vnn_div_vnvn(vnn, vn, vnn_sig)
+#         ratio = ratio[:, :, 2, ...]
+#         ratio_sig = ratio_sig[:, :, 2, ...]
+#     else:
+#         (vn, twist), (vn_sig, twist_sig) = find_v2_twist(fact_me, vnn_sig, )
+#         ratio, ratio_sig = vnn_div_vnvn(vnn[:, :, 2, ...], vn, vnn_sig[:, :, 2, ...])
+#         # multiply with the exp-part
+#         eta_centers = edges2centers(eta_edges)
+#         detas = np.abs(eta_centers[:, None] - eta_centers[None, :])
+#         ratio *= np.exp(twist[None, None, :, None] * detas[:, :, None, None])
+#     return ratio, ratio_sig
 
 
 def compute_pure_vns(vnn, vnn_sig, eta_edges, exclude_fmd, gaps_nbins):
@@ -514,16 +514,14 @@ def compute_pure_vns(vnn, vnn_sig, eta_edges, exclude_fmd, gaps_nbins):
     if isinstance(vnn, np.ma.MaskedArray):
         vnn = np.ma.filled(vnn, np.nan)
     if isinstance(vnn_sig, np.ma.MaskedArray):
-        vnn = np.ma.filled(vnn_sig, np.nan)
+        vnn_sig = np.ma.filled(vnn_sig, np.nan)
 
     vns, vns_sig = [], []
     for nbins in gaps_nbins:
         fact_me = np.copy(vnn)
         fact_me[deta_mask(eta_edges, nbins), ...] = np.nan
-
         if exclude_fmd:
             fact_me[fmd_mask(eta_edges), ...] = np.nan
-
         vn, vn_sig = find_v(fact_me, sigma=vnn_sig, )
         vns.append(vn)
         vns_sig.append(vn_sig)
@@ -538,7 +536,7 @@ def compute_twist_v2s(vnn, vnn_sig, eta_edges, exclude_fmd, gaps_nbins, nstraps=
     if isinstance(vnn, np.ma.MaskedArray):
         vnn = np.ma.filled(vnn, np.nan)
     if isinstance(vnn_sig, np.ma.MaskedArray):
-        vnn = np.ma.filled(vnn_sig, np.nan)
+        vnn_sig = np.ma.filled(vnn_sig, np.nan)
     v2s, v2s_sig = [], []
     twists, twists_sig = [], []
 
@@ -552,7 +550,19 @@ def compute_twist_v2s(vnn, vnn_sig, eta_edges, exclude_fmd, gaps_nbins, nstraps=
         # Twist currently only implemented for n=2!!!!!!! OBS: Shape has no `n`!!!
         (v2, twist), (v2_sig, twist_sig) = find_v2_twist(fact_me, vnn_sig=vnn_sig, eta_edges=eta_edges, nstraps=nstraps)
         v2s.append(v2)
-        v2s_sig.append(v2s_sig)
+        v2s_sig.append(v2_sig)
         twists.append(twist)
         twists_sig.append(twist_sig)
     return np.array(v2s), twists, np.array(v2s_sig), twists_sig
+
+
+def make_delta_centers(edges1, edges2):
+    """
+    Convert coordinates edges as edges2 - edges1
+    """
+    cent1 = np.array([np.mean([low, up])
+                      for low, up in zip(edges1[:-1], edges1[0:])])
+    cent2 = np.array([np.mean([low, up])
+                      for low, up in zip(edges2[:-1], edges2[0:])])
+    tmp = (cent2[:, None] - cent1[None, :])
+    return np.unique(np.round(tmp.flatten(), 2))
