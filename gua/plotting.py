@@ -23,7 +23,9 @@ def load_matplotlib_defaults():
     mpl.rcParams.update({'figure.autolayout': True})
     mpl.rcParams['text.latex.preamble'] = [
         # It seems that siunitx keeps using serif fonts for numbers!
-        # r'\usepackage{amsmath}',
+        r'\usepackage{amsmath}',
+        r'\usepackage{amsfonts}',
+        r'\usepackage{amssymb}',
         r'\usepackage{helvet}',    # set the normal font here
         r'\usepackage{tgheros}',   # upper case greek letters
         r'\usepackage{sansmath}',  # load up the sansmath so that math -> helvet
@@ -32,8 +34,8 @@ def load_matplotlib_defaults():
         r'\sansmath'               # <- tricky! -- gotta actually tell tex to use!
     ]
     params = {'legend.fontsize': 'small',
-              'axes.labelsize': 'small',
-              'axes.titlesize': 'small',
+              'axes.labelsize': 'medium',
+              'axes.titlesize': 'medium',
               'xtick.labelsize': 'small',
               'ytick.labelsize': 'small'}
     mpl.rcParams.update(params)
@@ -92,8 +94,8 @@ def generic_2d_no_cbar(a, edges1, edges2, ax, label=r'', a_label=r'', b_label=r'
     if np.any(np.isnan(a)) or (np.ma.is_masked(a) and np.any(~a.mask)):
         nan_color = 'gray'
         ax.patch.set(facecolor=nan_color)
-        patch_label = mpl.patches.Patch(color=nan_color, label='No data')
-        ax.legend(handles=[patch_label], loc='upper left')
+        patch_label = mpl.patches.Patch(color=nan_color, label='No acceptance')
+        ax.legend(handles=[patch_label], loc='upper left', title=kwargs.get('leg_title', None))
         has_legend = True
     # its row - colum order in numpy!
     ax.set_xlabel(b_label)
@@ -253,7 +255,7 @@ def _augment_fit_area(ax, eta_edges, ngap, exclude_fmd):
                 arrowprops=arrowprops)
     # Define legend handles
     handles = []
-    handles.append(mpl.patches.Patch(color='gray', label='No data'))
+    handles.append(mpl.patches.Patch(color='gray', label='No acceptance'))
 
     handles.append(mpl.patches.Patch(facecolor='none', edgecolor=_orange,
                                      linewidth=0, hatch=r'++',
@@ -265,20 +267,20 @@ def _augment_fit_area(ax, eta_edges, ngap, exclude_fmd):
                   hatch=r'\\\\')
         handles.append(mpl.patches.Patch(facecolor='none', edgecolor=_red,
                                          linewidth=0, hatch=r'\\\\',
-                                         label='Detector effects'))
+                                         label='Secondary effects'))
     leg = ax.legend(handles=handles,
                     # title=r'\textbf{ALICE Simulation}',
                     loc='upper left')
     leg.get_title().set_fontsize('small')
 
 
-def plot_fact_ratio(ratio, eta_edges, n, cent, nbins_deta_gap, exclude_fmd, vmin=0.92, vmax=1.08):
+def plot_fact_ratio(ratio, eta_edges, n, cent, nbins_deta_gap, exclude_fmd, vmin=0.92, vmax=1.08, **kwarg):
     # area excluded for factorization
     fig, ax, cax = setup_2d_fig()
     # merged_ratio = mirror_tri(merged_ratio)
-    label = r'$f_{%i}(\eta_a, \eta_b)$' % n
-    if nbins_deta_gap > 0:
-        label += r' for $|\Delta\eta| > %.1f$' % (0.2 * nbins_deta_gap)
+    label = kwarg.get('label', r'$f_{%i}(\eta_a, \eta_b)$' % n)
+    # if nbins_deta_gap > 0:
+    #     label += r' for $|\Delta\eta| > %.1f$' % (0.2 * nbins_deta_gap)
     generic_2d(ratio, eta_edges, eta_edges, ax=ax,
                cax=cax, cmap='RdBu', vmin=vmin, vmax=vmax,
                a_label=r'$\eta_a$', b_label=r'$\hspace{1.5em} \eta_b$',

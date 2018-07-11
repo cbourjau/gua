@@ -509,6 +509,10 @@ def compute_pure_vns(vnn, vnn_sig, eta_edges, exclude_fmd, gaps_nbins):
     Compute v_n pure-factorization-model
 
     Expects numpy array; not masked arrays!
+
+    Returns
+    -------
+    tuple: (vn, vn_sig) with shape (igap, eta, n, cent, z) each
     """
     logging.info("computing vns")
     if isinstance(vnn, np.ma.MaskedArray):
